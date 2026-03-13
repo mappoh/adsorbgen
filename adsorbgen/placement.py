@@ -7,9 +7,7 @@ placement in both end-on and side-on binding modes.
 import numpy as np
 from ase import Atoms
 from ase.neighborlist import natural_cutoffs, NeighborList
-from ase.data import atomic_numbers, covalent_radii
-
-from chemistry import get_covalent_radius
+from .chemistry import get_covalent_radius
 
 
 def list_tm_sites(structure, element):

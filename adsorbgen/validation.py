@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from ase.geometry import get_distances
 from ase.neighborlist import natural_cutoffs, NeighborList
 
-from chemistry import (
+from .chemistry import (
     get_covalent_radius,
     get_vdw_radius,
     get_bond_range,

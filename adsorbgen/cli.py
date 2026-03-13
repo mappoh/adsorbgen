@@ -6,37 +6,55 @@ by placing adsorbate molecules onto transition metal sites at various
 bond distances, angles, and orientations.
 
 Usage:
-    python adsorbgen.py config.yaml                 # Run generation
-    python adsorbgen.py config.yaml --dry-run       # Show parameter count + preview
-    python adsorbgen.py config.yaml --list-sites    # Show all TM sites
-    python adsorbgen.py --list-molecules            # Show built-in molecules
+    adsorbgen init                          # Create config.yaml interactively
+    adsorbgen init --non-interactive        # Copy example config
+    adsorbgen run [config.yaml]             # Generate (default: ./config.yaml)
+    adsorbgen run [config.yaml] --dry-run   # Preview
+    adsorbgen sites [config.yaml]           # List TM sites
+    adsorbgen molecules                     # List built-in molecules
 """
 
 import argparse
 import csv
 import os
+import shutil
 import sys
+from importlib import resources
 from itertools import product
 
 import numpy as np
 import yaml
 from ase.io import read, write
 
-from molecules import get_molecule, list_molecules, MOLECULES
-from placement import (
+from .molecules import get_molecule, list_molecules, MOLECULES
+from .placement import (
     list_tm_sites,
     detect_approach_direction,
     perturb_tm,
     place_end_on,
     place_side_on,
 )
-from validation import validate_config
+from .validation import validate_config
+
+
+def _get_example_config_path():
+    """Get the path to the bundled config_example.yaml."""
+    if sys.version_info >= (3, 9):
+        return resources.files("adsorbgen").joinpath("config_example.yaml")
+    else:
+        with resources.path("adsorbgen", "config_example.yaml") as p:
+            return p
 
 
 def load_config(config_path):
     """Load and validate YAML config."""
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Error: config file '{config_path}' not found")
+        print("Run 'adsorbgen init' to create one.")
+        sys.exit(1)
 
     # Validate required fields
     required = ["reference", "site", "adsorbate", "parameters"]
@@ -113,7 +131,7 @@ def load_adsorbate(config):
 
     binding_mode = config["adsorbate"].get("binding_mode", "end-on")
     binding_atom = config["adsorbate"].get("binding_atom")
-    binding_atom_index = config["adsorbate"].get("binding_atom_index", 0)
+    binding_atom_index = config["adsorbate"].get("binding_atom_index")
 
     if binding_atom and binding_atom_index is None:
         for i, (el, _) in enumerate(atom_list):
@@ -360,37 +378,210 @@ def run_list_sites(config):
     list_tm_sites(reference, element)
 
 
+def _prompt(text, default=""):
+    """Prompt user with a default value. Return the response or the default."""
+    if default:
+        response = input(f"{text} [{default}]: ").strip()
+    else:
+        response = input(f"{text}: ").strip()
+    return response if response else default
+
+
+def _parse_float_list(text):
+    """Parse a comma-separated string of floats."""
+    return [float(x.strip()) for x in text.split(",") if x.strip()]
+
+
+def run_init(non_interactive=False):
+    """Create a config.yaml in the current directory."""
+    output_path = os.path.join(os.getcwd(), "config.yaml")
+
+    if os.path.exists(output_path):
+        print(f"config.yaml already exists in {os.getcwd()}")
+        overwrite = input("Overwrite? (y/n) [n]: ").strip().lower()
+        if overwrite != "y":
+            print("Aborted.")
+            return
+
+    if non_interactive:
+        # Just copy the example config
+        example_path = _get_example_config_path()
+        shutil.copy2(str(example_path), output_path)
+        print(f"Written: {output_path}")
+        print("Edit this file to match your system, then run: adsorbgen run")
+        return
+
+    # Interactive prompts
+    print("adsorbgen config generator")
+    print("-" * 40)
+
+    poscar = _prompt("Reference POSCAR path", "POSCAR")
+    system_type = _prompt("System type (pom/zeolite/slab)", "pom")
+    tm_element = _prompt("TM element", "Ni")
+    site_index_str = _prompt("Site index (leave blank to pick later)", "")
+    site_index = int(site_index_str) if site_index_str else None
+
+    # Adsorbate
+    available = ", ".join(MOLECULES.keys())
+    source = _prompt(f"Adsorbate ({available}, or file path)", "H2O")
+
+    # Determine default binding mode from molecule if built-in
+    mol = get_molecule(source)
+    default_mode = mol["binding_mode"] if mol else "end-on"
+    binding_mode = _prompt("Binding mode (end-on/side-on)", default_mode)
+
+    # Bond distances
+    bond_str = _prompt("Bond distances (comma-separated)", "1.8, 2.0, 2.2")
+    bond_distances = _parse_float_list(bond_str)
+
+    tilt_str = _prompt("Tilt angles (comma-separated)", "0, 30, 45")
+    tilt_angles = _parse_float_list(tilt_str)
+
+    rot_str = _prompt("Rotation angles (comma-separated)", "0, 90, 180, 270")
+    rotation_angles = _parse_float_list(rot_str)
+
+    # Perturbation
+    perturb_yn = _prompt("Enable TM perturbation? (y/n)", "n").lower()
+    perturb_enabled = perturb_yn == "y"
+    if perturb_enabled:
+        disp_str = _prompt("Perturbation displacements (comma-separated)", "0.0, 0.1, 0.2")
+        displacements = _parse_float_list(disp_str)
+    else:
+        displacements = [0.0]
+
+    min_score_str = _prompt("Min validation score (0-100)", "70")
+    min_score = int(min_score_str)
+
+    out_dir = _prompt("Output directory", "./adsorption_configs")
+
+    # Build config dict
+    config = {
+        "reference": {
+            "poscar": poscar,
+            "system_type": system_type,
+        },
+        "site": {
+            "tm_element": tm_element,
+            "site_index": site_index,
+            "approach_direction": None,
+        },
+        "perturbation": {
+            "enabled": perturb_enabled,
+            "displacements": displacements,
+            "direction": None,
+        },
+        "adsorbate": {
+            "source": source,
+            "binding_mode": binding_mode,
+        },
+        "parameters": {
+            "bond_distances": bond_distances,
+            "tilt_angles": [int(x) if x == int(x) else x for x in tilt_angles],
+            "rotation_angles": [int(x) if x == int(x) else x for x in rotation_angles],
+        },
+        "validation": {
+            "min_score": min_score,
+            "min_distance": 1.0,
+        },
+        "output": {
+            "directory": out_dir,
+            "naming": "config_{:04d}",
+            "summary_file": "summary.csv",
+        },
+    }
+
+    # Add binding atom info for end-on built-in molecules
+    if mol and binding_mode == "end-on":
+        config["adsorbate"]["binding_atom"] = mol["binding_atom"]
+
+    with open(output_path, "w") as f:
+        # Write a header comment
+        f.write("# adsorbgen configuration\n")
+        f.write("# Generated by: adsorbgen init\n\n")
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+    print(f"\nWritten: {output_path}")
+    print("Run 'adsorbgen run' to generate configurations.")
+
+
+def _is_subcommand(arg):
+    """Check if an argument is a known subcommand."""
+    return arg in ("init", "run", "sites", "molecules")
+
+
 def main():
+    # Check for legacy usage before argparse gets a chance to error
+    # Legacy: adsorbgen config.yaml [--dry-run|--list-sites|--list-molecules]
+    if len(sys.argv) > 1 and not _is_subcommand(sys.argv[1]) and not sys.argv[1].startswith("-"):
+        # First arg looks like a config file path (not a subcommand, not a flag)
+        legacy_parser = argparse.ArgumentParser(description="Adsorption Configuration Generator (legacy mode)")
+        legacy_parser.add_argument("config")
+        legacy_parser.add_argument("--dry-run", action="store_true")
+        legacy_parser.add_argument("--list-sites", action="store_true")
+        legacy_args = legacy_parser.parse_args()
+
+        config = load_config(legacy_args.config)
+        if legacy_args.list_sites:
+            run_list_sites(config)
+        elif legacy_args.dry_run:
+            run_dry_run(config)
+        else:
+            run_generation(config)
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--list-molecules":
+        list_molecules()
+        return
+
     parser = argparse.ArgumentParser(
         description="Adsorption Configuration Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("config", nargs="?", help="Path to YAML config file")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Show parameter count without generating")
-    parser.add_argument("--list-sites", action="store_true",
-                        help="List all TM sites in the reference structure")
-    parser.add_argument("--list-molecules", action="store_true",
-                        help="Show available built-in molecules")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # init subcommand
+    init_parser = subparsers.add_parser("init", help="Create config.yaml interactively")
+    init_parser.add_argument("--non-interactive", action="store_true",
+                             help="Copy example config without prompting")
+
+    # run subcommand
+    run_parser = subparsers.add_parser("run", help="Generate adsorption configurations")
+    run_parser.add_argument("config", nargs="?", default="config.yaml",
+                            help="Path to YAML config file (default: config.yaml)")
+    run_parser.add_argument("--dry-run", action="store_true",
+                            help="Show parameter count without generating")
+
+    # sites subcommand
+    sites_parser = subparsers.add_parser("sites", help="List TM sites in reference structure")
+    sites_parser.add_argument("config", nargs="?", default="config.yaml",
+                              help="Path to YAML config file (default: config.yaml)")
+
+    # molecules subcommand
+    subparsers.add_parser("molecules", help="List available built-in molecules")
+
     args = parser.parse_args()
 
-    if args.list_molecules:
-        list_molecules()
-        return
-
-    if args.config is None:
+    if args.command is None:
         parser.print_help()
         return
 
-    config = load_config(args.config)
+    if args.command == "init":
+        run_init(non_interactive=args.non_interactive)
 
-    if args.list_sites:
+    elif args.command == "molecules":
+        list_molecules()
+
+    elif args.command == "run":
+        config = load_config(args.config)
+        if args.dry_run:
+            run_dry_run(config)
+        else:
+            run_generation(config)
+
+    elif args.command == "sites":
+        config = load_config(args.config)
         run_list_sites(config)
-    elif args.dry_run:
-        run_dry_run(config)
-    else:
-        run_generation(config)
 
 
 if __name__ == "__main__":

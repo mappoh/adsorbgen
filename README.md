@@ -8,28 +8,37 @@ A 9-rule validation pipeline filters out chemically nonsensical configurations b
 
 ```bash
 git clone https://github.com/mappoh/adsorbgen.git
-pip install ase numpy pyyaml
+cd adsorbgen
+pip install .          # install globally
+# or
+pip install -e .       # editable install (for development)
 ```
 
 ## Usage
 
 ```bash
+# Create config.yaml interactively
+adsorbgen init
+
+# Or copy the example config to edit manually
+adsorbgen init --non-interactive
+
 # Show available built-in molecules
-python adsorbgen.py --list-molecules
+adsorbgen molecules
 
 # List TM sites in your structure
-python adsorbgen.py config.yaml --list-sites
+adsorbgen sites config.yaml
 
 # Preview how many configs will be generated
-python adsorbgen.py config.yaml --dry-run
+adsorbgen run config.yaml --dry-run
 
-# Generate configurations
-python adsorbgen.py config.yaml
+# Generate configurations (defaults to ./config.yaml)
+adsorbgen run
 ```
 
 ## Config
 
-Copy `config_example.yaml` and edit to match your system:
+Run `adsorbgen init` to create a config interactively, or copy the example and edit:
 
 ```yaml
 reference:
