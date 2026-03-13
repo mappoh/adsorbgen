@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pyo
+adsorption_configs/
+*.csv
+.DS_Store

@@ -1,0 +1,39 @@
+# adsorbgen — Adsorption Configuration Generator
+# Example configuration file
+
+reference:
+  poscar: "POSCAR_ref"             # Path to reference structure (POM, zeolite, slab)
+  system_type: "zeolite"           # "zeolite", "pom", or "slab" (affects which rules apply)
+
+site:
+  tm_element: "Ni"                 # Element symbol of the TM site
+  site_index: null                 # null = list all, user picks; integer = specific atom index
+  approach_direction: null         # null = auto-detect from neighbors; [x,y,z] = manual override
+
+perturbation:
+  enabled: true                    # Whether to perturb TM before adsorption
+  displacements: [0.0, 0.1, 0.2, 0.3]   # Å along approach direction (0.0 = unperturbed)
+  direction: null                         # null = use approach direction; [x,y,z] = custom
+
+adsorbate:
+  source: "H2O"                   # Built-in name OR path to POSCAR/XYZ/CIF file
+  binding_mode: "end-on"          # "end-on" or "side-on"
+  # For end-on:
+  binding_atom: "O"               # Which atom bonds to TM
+  binding_atom_index: null        # null = first matching element; integer = specific
+  # For side-on (e.g., ethene η2):
+  # binding_atoms: [0, 1]         # Indices of the two atoms forming the binding face
+
+parameters:
+  bond_distances: [1.8, 2.0, 2.2, 2.5]   # TM to binding point distance (Å)
+  tilt_angles: [0, 30, 45]                 # Tilt from approach direction (degrees)
+  rotation_angles: [0, 90, 180, 270]       # Azimuthal rotation (degrees)
+
+validation:
+  min_score: 70                    # Only write configs scoring >= this (0-100)
+  min_distance: 1.0               # Hard overlap threshold (Å) — below this is always rejected
+
+output:
+  directory: "./adsorption_configs"       # Where to write output
+  naming: "config_{:04d}"                 # Folder naming pattern
+  summary_file: "summary.csv"            # Summary CSV filename
